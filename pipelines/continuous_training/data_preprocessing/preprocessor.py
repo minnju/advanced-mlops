@@ -161,8 +161,8 @@ class Preprocessor:
         for feature in features:
             scaler = RobustScaler()
             robust_scalers[feature]=scaler.fit(x_train[[feature]])
-            x_train[feature]=scaler.transform(x_train[feature])
-            x_val[feature]=scaler.transform(x_val[feature])
+            x_train[feature]=scaler.transform(x_train[[feature]])
+            x_val[feature]=scaler.transform(x_val[[feature]])
             print(f"Robust Scaler has been applied to {feature}.")
 
         # TODO: robust_scalers 딕셔너리를 self._encoder_path에 robust_scaler.joblib 이름으로 저장
