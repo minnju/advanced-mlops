@@ -27,7 +27,8 @@ def get_branch_by_api_status() -> list[str] | str:
         if response.status_code == 200:
             # TODO: 헬스체크의 응답이 올바르게 왔다면 다음 Task를 실행해야 함
             # "get_deployed_model_creation_time", "get_latest_trained_model_creation_time" 를 실행해야 함
-            return
+            return ["get_deployed_model_creation_time",
+                "get_latest_trained_model_creation_time",]
         else:
             return "deploy_new_model"
     except Exception as e:
@@ -41,7 +42,9 @@ def get_deployed_model_creation_time() -> datetime | None:
         response = requests.post("http://localhost:3000/metadata")
         if response.status_code == 200:
             # TODO: 메타데이터 조회 응답이 올바르게 왔다면 메타데이터 내 모델의 생성 시간(creation_time)을 datetime 객체로 반환해야 함
-            return
+            return datetime.strptime(
+                response.json().get("creation_time"), "%Y-%m-%dT%H:%M:%S.%fZ"
+            )
         else:
             print(
                 f"`creation_time`을 불러올 수 없습니다.: {response.status_code}"
@@ -57,7 +60,7 @@ def get_latest_trained_model_creation_time() -> datetime | None:
     try:
         bento_model = bentoml.models.get("credit_score_classification:latest")
         # TODO: bento_model의 creation_time의 timezone 정보를 제거하고 반환
-        return
+        return bento_model.info.creation_time.replace(tzinfo=None)
     except Exception as e:
         print(f"Error getting latest trained model creation time: {e}")
         return None
@@ -88,10 +91,12 @@ def decide_model_update():
     print("deployed_creation_time", deployed_creation_time)
     print("trained_creation_time", trained_creation_time)
 
+    #배포된게 없다면
     if deployed_creation_time is None:
         print("There is no deployed model!")
         return "deploy_new_model"
 
+    #학습된 모델이 있고 학습된 시간이 배포된 시간보다 나중이면 new 모델 배포
     if (
         trained_creation_time is not None
         and trained_creation_time > deployed_creation_time
@@ -119,26 +124,36 @@ with DAG(
     tags=set(["lgcns", "mlops"]),
 ) as dag:
     # TODO: API 상태 체크 결과 가져오기
-    get_api_status_task = EmptyOperator(task_id="get_branch_by_api_status")
+    get_api_status_task = BranchPythonOperator(
+        task_id="get_branch_by_api_status",
+        python_callable=get_branch_by_api_status,
+        )
 
     # TODO: 현재 컨테이너에서 실행 중인 모델의 creation_time 가져오기
-    get_deployed_model_creation_time_task = EmptyOperator(
+    get_deployed_model_creation_time_task = PythonOperator(
         task_id="get_deployed_model_creation_time",
+        python_callable=get_deployed_model_creation_time,
     )
 
     # TODO: 로컬에서 최신 학습된 모델의 creation_time 가져오기
-    get_latest_trained_model_creation_time_task = EmptyOperator(
+    get_latest_trained_model_creation_time_task = PythonOperator(
         task_id="get_latest_trained_model_creation_time",
+        python_callable=get_latest_trained_model_creation_time,
     )
 
     # TODO: 모델을 업데이트할지 결정
-    decide_update_task = EmptyOperator(
+    decide_update_task = BranchPythonOperator(
         task_id="decide_update",
+        python_callable=decide_model_update,
     )
 
     # TODO: 새로운 모델을 배포
-    deploy_new_model_task = EmptyOperator(
+    # 하나라도 성공하면 모델배포할수있게 해야함(?)
+    deploy_new_model_task = BashOperator(
         task_id="deploy_new_model",
+        bash_command=f"cd {airflow_dags_path}/api/docker &&"
+        "docker compose up --build --detach",
+        trigger_rule="one_success",
     )
 
     # 배포를 건너뛸 경우 실행할 더미 태스크
