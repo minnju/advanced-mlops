@@ -71,21 +71,30 @@ class CreditScoreClassifier:
         customer_id = df.pop("customer_id").item()
 
         # TODO: RobustScaler 적용
+        for col, scaler in self.robust_scalers.items():
+            df[col]=scaler.transform(df[[col]])
 
         # TODO: 모델 추론 결과로 확률값과 예측 레이블을 저장
-        prob = None
-        label = None
-
+        prob = np.max(self.model.predict(df,     prediction_type="Probability"))
+        label = self.model.predict(df, prediction_type="Class").item()
         elapsed_ms = (time.time() - start_time) * 1000
 
         record = CreditPredictionApiLog(
-            # TODO: 기본값이 존재하지 않는 컬럼에 적절한 값 매핑
+            customer_id=customer_id,
+            features=data.model_dump(),
+            prediction=label,
+            confidence=prob,
+            elapsed_ms=elapsed_ms,
         )
 
-        # TODO: 로깅할 값을 테이블에 적재 후 커밋
+        # TODO: 로깅할 값을 테이블에 적재 후 커밋 => 실제 서비스에서는 FASTAPI 를 이용하여 background로 돌도록 함
+        with self.session_maker() as db:
+            with db.begin():
+                db.add(record)
 
         return Response(customer_id=customer_id, predict=label, confidence=prob)
 
+    #bentoml은 post만 지원한다는 단점
     @bentoml.api(route="/metadata", output_spec=MetadataResponse)
     def metadata(self) -> MetadataResponse:
         """현재 컨테이너에서 서빙 중인 모델의 메타데이터를 반환합니다."""
